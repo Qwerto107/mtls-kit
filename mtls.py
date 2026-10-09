@@ -88,6 +88,13 @@ def initialization_directory(value):
 
 
 def prompt_value(label, default, validate):
+    # 真实终端中启用行编辑，兼容常见退格字符；管道输入保持原样。
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        try:
+            import readline  # 导入后 input 自动使用行编辑，不接管 getpass 密码输入。
+        except ImportError:
+            # Windows 等缺少 readline 的环境继续使用原生 input。
+            pass
     # 空输入使用默认值；必填项没有默认值，无效输入允许重试。
     prompt = f'{label}（默认 {default}）：' if default is not None else f'{label}：'
     while True:
