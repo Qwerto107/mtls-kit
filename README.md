@@ -31,7 +31,7 @@ Nginx 等验证端由你配置、同步公开材料和重载；应用自身负�
 `init` 成功后会记住数据目录，后续命令未指定 `--data-dir` 时自动使用它。
 已有 CA 和证书可通过 `--data-dir 原数据目录` 继续管理，无需重新初始化。
 新配置使用 `mtls_ca` 节；工具不会自动改写已有 CA 的名称或配置。
-所有示例从 `mtls-kit` 项目目录执行，全局参数放在子命令之前。
+相对路径形式的 `python3 mtls.py` 命令在脚本所在目录执行；绝对路径和快捷函数可在其他目录使用。全局参数放在子命令之前。
 初始化示例按场景选择一种，不要依次执行；已有 CA 直接使用查询、签发等命令，不再执行 `init`。
 
 服务器直接部署 Nginx 时的证书签发、Nginx 手动配置和浏览器安装流程见 [mTLS 部署指南](docs/nginx-mtls.md)。
@@ -43,6 +43,37 @@ Nginx 等验证端由你配置、同步公开材料和重载；应用自身负�
 ├── data/        # 私有签发数据，仅管理员可访问
 └── public/      # 公开 CA 证书和 CRL，供 Nginx 读取
 ```
+
+## 获取和安装脚本
+
+服务器安装示例在 root shell 中直接执行。先准备脚本目录：
+
+```bash
+install -d -o root -g root -m 755 /data/mtls-kit
+```
+
+**方式一：从 GitHub 获取。** 使用 curl 直接保存脚本：
+
+```bash
+curl --fail --location --show-error \
+  --output /data/mtls-kit/mtls.py \
+  https://raw.githubusercontent.com/Qwerto107/mtls-kit/main/mtls.py
+```
+
+**方式二：手动安装。** 从 [GitHub 仓库](https://github.com/Qwerto107/mtls-kit) 下载源码或脚本，也可将可信的本地 `mtls.py` 上传到服务器。
+在该文件所在目录执行以下命令，与上面的在线获取方式二选一：
+
+```bash
+install -o root -g root -m 600 mtls.py /data/mtls-kit/mtls.py
+```
+
+安装完成后查看环境状态：
+
+```bash
+python3 /data/mtls-kit/mtls.py status
+```
+
+更新脚本也使用上述安装方式，只替换 `mtls.py`，保留已有证书数据与默认目录配置，不重新初始化 CA。
 
 ## 默认数据目录
 
@@ -72,6 +103,30 @@ Linux 配置目录权限为 700，配置文件为 600；配置不包含密码、
 配置损坏时会报错，不自动回退到其他目录；可以显式使用 `--data-dir` 继续操作并修复配置。
 已有 CA 不要重新初始化：继续指定 `--data-dir`，或手动将其绝对路径填入上述配置文件。
 该配置不会搬移证书数据或修改 `openssl.cnf` 中的目录。
+
+## Bash 快捷函数
+
+脚本安装到 `/data/mtls-kit/mtls.py` 后，在 Bash 终端定义：
+
+```bash
+mtls() {
+  # 使用当前用户保存的目录，并原样转发命令参数。
+  python3 /data/mtls-kit/mtls.py "$@"
+}
+```
+
+函数不固定数据目录，自动使用当前用户已保存的目录；如需临时操作其他目录，可在子命令前提供 `--data-dir`。
+首次初始化到指定目录时使用 `mtls --data-dir /data/mtls-kit/data init`；已有 CA 跳过初始化，先确认默认目录配置。
+后续可在任意工作目录执行：
+
+```bash
+mtls status
+mtls issue
+mtls list
+mtls paths
+```
+
+函数仅对当前终端有效；新终端需重新定义，或把函数保存到当前用户的 `~/.bashrc` 后重新加载。
 
 ## 快速开始
 

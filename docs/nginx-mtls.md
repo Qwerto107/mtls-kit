@@ -15,7 +15,7 @@
 | 受保护域名 | `admin.example.com`，直接访问网关 |
 | TLS 网关服务 | 服务器直接安装的 Nginx，示例由 systemd 管理 |
 | 受保护应用 | `127.0.0.1:8080` |
-| 证书工具运行方式 | 从可信源码复制脚本，在服务器运行 |
+| 证书工具运行方式 | 从 GitHub 获取或手动安装脚本，在服务器运行 |
 | CA 数据目录 | `/data/mtls-kit/data` |
 | 脚本路径 | `/data/mtls-kit/mtls.py` |
 | Nginx 公开验证材料 | `/data/mtls-kit/public` |
@@ -57,7 +57,17 @@ install -d -o root -g root -m 700 /data/mtls-kit/data
 install -d -o root -g root -m 755 /data/mtls-kit/public /usr/share/nginx/mtls-errors
 ```
 
-从可信源码安装脚本，以下命令在 `mtls-kit` 项目目录执行：
+选择以下一种方式安装脚本。
+
+**从 GitHub 获取：** 使用 curl 直接保存脚本：
+
+```bash
+curl --fail --location --show-error \
+  --output /data/mtls-kit/mtls.py \
+  https://raw.githubusercontent.com/Qwerto107/mtls-kit/main/mtls.py
+```
+
+**手动安装：** 从 [GitHub 仓库](https://github.com/Qwerto107/mtls-kit) 下载源码或脚本，或把可信的本地脚本上传到服务器。在 `mtls.py` 所在目录执行：
 
 ```bash
 # 核对脚本来源后安装，只有 root 能修改和读取。
@@ -69,18 +79,21 @@ install -o root -g root -m 600 \
 
 ```bash
 mtls() {
-  python3 /data/mtls-kit/mtls.py --data-dir /data/mtls-kit/data "$@"
+  # 使用当前用户保存的目录，并原样转发命令参数。
+  python3 /data/mtls-kit/mtls.py "$@"
 }
 
 mtls status
-mtls init
+# 仅首次初始化指定目录时执行；已有 CA 跳过这一行
+mtls --data-dir /data/mtls-kit/data init
 mtls issue admin-laptop
 mtls paths admin-laptop
 ```
 
-`mtls` 是当前终端的 Bash 函数，新开终端需重新定义，或保存到个人 shell 配置中。
+`mtls` 是当前终端的 Bash 函数，新开终端需重新定义，或保存到当前用户的 `~/.bashrc` 后重新加载。
+快捷函数不固定数据目录，使用已保存的默认目录；首次初始化时显式指定 `/data/mtls-kit/data`，后续无需重复传入。
 `mtls status` 只检查环境和 `openssl.cnf` 是否存在，不证明 CA 材料完整；设备证书用 `mtls check 设备名` 校验。
-不使用函数时，首次初始化也可直接执行下面的等价命令，与上面的 `mtls init` 二选一：
+不使用函数时，首次初始化也可直接执行下面的等价命令，与上面的快捷函数初始化命令二选一：
 
 ```bash
 python3 /data/mtls-kit/mtls.py --data-dir /data/mtls-kit/data init
@@ -133,7 +146,7 @@ mtls export admin-laptop \
 随后检查 `mtls list`、`mtls check admin-laptop`，确认无误后再更新公开材料路径；保留原目录备份，不要重新执行 `init`，也不需要改已有 CA 名称或配置节名称。
 如果后续依赖已保存的默认目录，还需将当前用户配置文件的 `data_dir` 更新为新目录；配置只记录路径，不会自动迁移数据。
 
-## 3. 同步公开材料与手动安装证书
+## 3. 同步公开材料
 
 在服务器执行以下命令，将公开材料复制到 Nginx 专用目录：
 
@@ -141,31 +154,6 @@ mtls export admin-laptop \
 install -o root -g root -m 644 /data/mtls-kit/data/ca.crt /data/mtls-kit/public/ca.crt
 install -o root -g root -m 644 /data/mtls-kit/data/ca.crl /data/mtls-kit/public/ca.crl
 ```
-
-通过可信方式把对应设备的 `client.p12` 交给持有者。该文件包含私钥，不放进公开下载目录。
-
-- Windows：打开 P12/PFX，导入“当前用户”的“个人”证书库；也可在浏览器证书设置中导入。
-- Firefox：在证书管理的“您的证书”中导入，具体入口随版本变化。
-- macOS：通过钥匙串访问导入个人证书，然后在浏览器中选择该证书。
-
-输入签发时的客户端密码，重新打开应用页面。浏览器可能要求选择证书。
-服务端使用公开可信证书时，不需要为了访问网站把私有客户端 CA 设为系统受信任网站根证书。
-
-### Android 安装 P12
-
-将该设备的 `client.p12` 通过可信方式传到手机，在系统设置中搜索“安装证书”或“凭据”。
-常见入口为“安全与隐私 → 更多安全设置 → 加密与凭据 → 安装证书”，具体名称随 Android 版本和厂商变化。
-选择“VPN 和应用”一类的用户证书用途，打开 P12，输入客户端密码并为证书命名；若系统要求，先设置屏幕锁。
-这里导入的是带私钥的客户端身份，不能用“CA 证书”或仅供 Wi-Fi 使用的安装项代替。
-安装后在 Chrome 访问受保护域名，并在系统证书选择提示中选择该设备的证书；可在“用户凭据”中核对安装结果。
-系统凭据入口可参考 [Android 证书管理说明](https://support.google.com/pixelphone/answer/2844832?hl=en)，其页面中的 Wi-Fi 示例应按本工具用途改选“VPN 和应用”。
-
-### Chrome 已安装证书但没有再次询问
-
-先确认安装了对应的 P12，证书尚未过期，且具有可用私钥。Windows 下应位于当前用户的“个人”证书库；Android 下应作为“VPN 和应用”用户证书安装。
-如果此前取消过证书选择，Chrome 可能继续沿用“不发送证书”的选择；Chromium 会按服务器主机和端口缓存这类决定。[Chromium 客户端证书选择缓存](https://github.com/chromium/chromium/blob/main/net/ssl/ssl_client_auth_cache.h)
-可完全退出 Chrome 后重新打开再试。Windows 下确认后台 Chrome 进程也已结束，Android 下可在应用设置中强行停止后重新打开；仅刷新页面或关闭当前标签不一定建立新的认证流程。
-若仍未出现选择提示，继续检查是否访问了正确受保护域名、是否直接连接 Nginx，以及 Nginx 的客户端 CA 和证书有效期是否匹配。
 
 ## 4. 服务器 Nginx 手动配置
 
@@ -322,7 +310,36 @@ nginx -t
 应用的登录、用户权限和会话检查继续由应用自身执行；通过 mTLS 验证只表示客户端证书被接受。
 应用需要使用代理头时，只信任实际 Nginx 来源，避免直接接受来访者伪造的代理信息。
 
-## 6. 验证部署
+## 6. 客户端手动安装证书
+
+完成 Nginx 配置并启动或重载服务、检查绕过入口后，在对应客户端设备安装证书。
+
+通过可信方式把对应设备的 `client.p12` 交给持有者。该文件包含私钥，不放进公开下载目录。
+
+- Windows：打开 P12/PFX，导入“当前用户”的“个人”证书库；也可在浏览器证书设置中导入。
+- Firefox：在证书管理的“您的证书”中导入，具体入口随版本变化。
+- macOS：通过钥匙串访问导入个人证书，然后在浏览器中选择该证书。
+
+输入签发时的客户端密码，重新打开应用页面。浏览器可能要求选择证书。
+服务端使用公开可信证书时，不需要为了访问网站把私有客户端 CA 设为系统受信任网站根证书。
+
+### Android 安装 P12
+
+将该设备的 `client.p12` 通过可信方式传到手机，在系统设置中搜索“安装证书”或“凭据”。
+常见入口为“安全与隐私 → 更多安全设置 → 加密与凭据 → 安装证书”，具体名称随 Android 版本和厂商变化。
+选择“VPN 和应用”一类的用户证书用途，打开 P12，输入客户端密码并为证书命名；若系统要求，先设置屏幕锁。
+这里导入的是带私钥的客户端身份，不能用“CA 证书”或仅供 Wi-Fi 使用的安装项代替。
+安装后在 Chrome 访问受保护域名，并在系统证书选择提示中选择该设备的证书；可在“用户凭据”中核对安装结果。
+系统凭据入口可参考 [Android 证书管理说明](https://support.google.com/pixelphone/answer/2844832?hl=en)，其页面中的 Wi-Fi 示例应按本工具用途改选“VPN 和应用”。
+
+### Chrome 已安装证书但没有再次询问
+
+先确认安装了对应的 P12，证书尚未过期，且具有可用私钥。Windows 下应位于当前用户的“个人”证书库；Android 下应作为“VPN 和应用”用户证书安装。
+如果此前取消过证书选择，Chrome 可能继续沿用“不发送证书”的选择；Chromium 会按服务器主机和端口缓存这类决定。[Chromium 客户端证书选择缓存](https://github.com/chromium/chromium/blob/main/net/ssl/ssl_client_auth_cache.h)
+可完全退出 Chrome 后重新打开再试。Windows 下确认后台 Chrome 进程也已结束，Android 下可在应用设置中强行停止后重新打开；仅刷新页面或关闭当前标签不一定建立新的认证流程。
+若仍未出现选择提示，继续检查是否访问了正确受保护域名、是否直接连接 Nginx，以及 Nginx 的客户端 CA 和证书有效期是否匹配。
+
+## 7. 验证部署
 
 先在签发工具中检查本地证书与 CRL：
 
@@ -355,7 +372,7 @@ Windows 系统 curl 如果使用 Schannel，先导入系统证书库并按其证
 使用浏览器访问应用，检查客户端证书选择及应用自身的登录和权限流程。
 测试时保持正常的服务端证书验证，不用 `curl -k` 掩盖域名或证书链问题。
 
-## 7. 续签、吊销及同步 CRL
+## 8. 续签、吊销及同步 CRL
 
 ### 客户端续签
 
@@ -419,7 +436,7 @@ nginx -t
 服务端公开证书仍由原 ACME 工具续期；成功后按既有流程重载网关。
 HTTP-01 续期需要不要求客户端证书的 challenge 入口，可单独在 80 端口提供；DNS-01 不依赖这个 HTTP 入口。[Certbot 续期说明](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates)
 
-## 8. 故障定位与备份
+## 9. 故障定位与备份
 
 | 现象 | 优先检查 |
 | --- | --- |
