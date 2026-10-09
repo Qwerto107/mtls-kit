@@ -8,6 +8,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -611,12 +612,151 @@ def parser():
     paths.add_argument('name', nargs='?', help='可选设备名')
     paths.add_argument('--serial', help='指定设备的历史证书序列号')
     commands.add_parser('status', help='查看 Python、OpenSSL、CA 数据位置和初始化状态')
+    completion = commands.add_parser('completion', help='输出只读的 Shell 补全脚本')
+    completion.add_argument('shell', choices=['bash'], help='目前支持 Bash 4+，加载后补全 mtls 快捷函数')
+    # 内部查询只返回候选，不执行原命令；隐藏参数避免干扰日常帮助。
+    completion.add_argument('--complete', nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
     return result
+
+
+def completion_values(action, prefix, explicit_directory):
+    # 路径交给 Bash 原生补全，避免空格路径被拆分。
+    if action.dest == 'data_dir':
+        return 'directory', []
+    if action.dest in ('openssl', 'ca_password_file', 'client_password_file', 'p12_password_file', 'output'):
+        return 'file', []
+    if action.choices:
+        values = action.choices
+    elif action.dest == 'name':
+        # 复用索引解析，包含历史设备；不读取私钥、不调用 OpenSSL。
+        authority = Authority(argparse.Namespace(data_dir=explicit_directory, openssl='openssl'))
+        values = sorted({entry['name'] for entry in authority.rows()})
+    else:
+        values = []
+    return 'plain', [value for value in values if value.startswith(prefix)]
+
+
+def completion_candidates(words, cursor):
+    # 从现有 argparse 定义获取命令、参数和枚举值，避免维护第二份菜单。
+    root = parser()
+    commands = next(action.choices for action in root._actions if isinstance(action, argparse._SubParsersAction))
+    current_parser = root
+    pending = None
+    explicit_directory = None
+    has_positional = False
+    positional_only = False
+    for word in words[1:cursor]:
+        if pending:
+            # Bash 会把 --参数=值 拆成多个词，等号本身不算参数值。
+            if word == '=':
+                continue
+            if pending.dest == 'data_dir':
+                explicit_directory = word.removeprefix('=')
+            pending = None
+            continue
+        if word == '--':
+            positional_only = True
+            continue
+        option, separator, value = word.partition('=')
+        actions = {flag: action for action in current_parser._actions for flag in action.option_strings}
+        if not positional_only and option in actions:
+            action = actions[option]
+            if action.nargs != 0:
+                if separator:
+                    if action.dest == 'data_dir':
+                        explicit_directory = value
+                else:
+                    pending = action
+            continue
+        if current_parser is root and not positional_only and word in commands:
+            current_parser = commands[word]
+        elif current_parser is not root and not word.startswith('-'):
+            has_positional = True
+    prefix = words[cursor]
+    if pending:
+        return completion_values(pending, prefix.removeprefix('='), explicit_directory)
+    actions = {flag: action for action in current_parser._actions for flag in action.option_strings}
+    # 也接受未被 Bash 拆分的 --参数=值 形式；路径形式仍走文件补全。
+    option, separator, value = prefix.partition('=')
+    if not positional_only and separator and option in actions:
+        mode, values = completion_values(actions[option], value, explicit_directory)
+        return mode, [option + '=' + candidate for candidate in values]
+    if not positional_only and prefix.startswith('-'):
+        return 'plain', [flag for flag, action in actions.items() if action.help != argparse.SUPPRESS and flag.startswith(prefix)]
+    if current_parser is root:
+        return 'plain', [command for command in commands if command.startswith(prefix)]
+    positional = next((action for action in current_parser._actions if not action.option_strings), None)
+    if positional and not has_positional:
+        return completion_values(positional, prefix, explicit_directory)
+    return 'plain', []
+
+
+def bash_completion():
+    # 固定到当前脚本和 Python 路径；Shell 引号保护空格及特殊字符。
+    invocation = f'{shlex.quote(sys.executable)} {shlex.quote(str(Path(__file__).resolve()))}'
+    return r'''# mtls-kit Bash 4+ 补全；仅查询候选，不执行证书操作。
+_mtls_complete() {
+    local cur="${COMP_WORDS[COMP_CWORD]}" candidate option_prefix=""
+    local -a matches
+    COMPREPLY=()
+    mapfile -t matches < <(__INVOCATION__ completion bash --complete "$COMP_CWORD" "${COMP_WORDS[@]}" 2>/dev/null)
+    case "${matches[0]-}" in
+        directory|file)
+            # 保留未拆分的 --参数= 前缀；文件名作为数组元素保留空格。
+            if [[ "$cur" == --*=* ]]; then
+                option_prefix="${cur%%=*}="
+                cur="${cur#*=}"
+            elif [[ "$cur" == =* ]]; then
+                cur="${cur#=}"
+            fi
+            # ~/ 路径展开为当前用户的绝对路径，不执行 eval。
+            if [[ "$cur" == '~/'* ]]; then
+                cur="$HOME/${cur:2}"
+            fi
+            if [[ "${matches[0]}" == directory ]]; then
+                mapfile -t COMPREPLY < <(compgen -d -- "$cur")
+            else
+                mapfile -t COMPREPLY < <(compgen -f -- "$cur")
+            fi
+            if [[ -n "$option_prefix" ]]; then
+                for candidate in "${!COMPREPLY[@]}"; do
+                    COMPREPLY[candidate]="$option_prefix${COMPREPLY[candidate]}"
+                done
+            fi
+            compopt -o filenames
+            ;;
+        plain) COMPREPLY=("${matches[@]:1}") ;;
+    esac
+}
+complete -F _mtls_complete mtls
+'''.replace('__INVOCATION__', invocation)
+
+
+def complete(args):
+    if args.complete is None:
+        print(bash_completion(), end='')
+        return
+    # 补全错误静默返回空候选，配置损坏时也不会回退到其他 CA。
+    try:
+        cursor = int(args.complete[0])
+        words = args.complete[1:]
+        if not 0 <= cursor < len(words):
+            return
+        mode, values = completion_candidates(words, cursor)
+    except (IndexError, ValueError, OSError, ToolError, UnicodeError):
+        return
+    print(mode)
+    for value in values:
+        print(value)
 
 
 def main():
     args = parser().parse_args()
     try:
+        # 生成和查询补全均跳过环境检查及密码流程。
+        if args.command == 'completion':
+            complete(args)
+            return 0
         authority = Authority(args)
         if args.command == 'status':
             print(f'Python：{sys.version.split()[0]}\nOpenSSL：{authority.require_openssl()}')

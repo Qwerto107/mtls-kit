@@ -92,6 +92,36 @@ mtls paths admin-laptop
 
 `mtls` 是当前终端的 Bash 函数，新开终端需重新定义，或保存到当前用户的 `~/.bashrc` 后重新加载。
 快捷函数不固定数据目录，使用已保存的默认目录；首次初始化时显式指定 `/data/mtls-kit/data`，后续无需重复传入。
+需要 Tab 补全时，在 Bash 4+ 中定义函数后加载：
+
+```bash
+source <(mtls completion bash)
+```
+
+补全支持子命令、参数、算法、吊销原因、已有设备名和路径，不调用 OpenSSL、不询问密码。
+设备名使用当前用户已保存的目录或命令行中的 `--data-dir`。
+更新脚本后重新加载补全；详细说明见 [Bash Tab 补全](../README.md#tab-补全)。
+
+如需每次打开 Bash 终端都启用，编辑当前用户的 `~/.bashrc`，将以下完整配置加入文件末尾。
+本文使用 root 操作，对应文件为 `/root/.bashrc`；已存在的 `mtls` 函数和补全加载行应替换，避免重复添加。需要 Bash 4+：
+
+```bash
+# mtls-kit 快捷命令：使用当前用户保存的数据目录。
+mtls() {
+  python3 /data/mtls-kit/mtls.py "$@"
+}
+
+# 先定义函数，再加载 Tab 补全。
+source <(mtls completion bash)
+```
+
+保存后在当前 Bash 终端重新加载，并查看状态：
+
+```bash
+source ~/.bashrc
+mtls status
+```
+
 `mtls status` 只检查环境和 `openssl.cnf` 是否存在，不证明 CA 材料完整；设备证书用 `mtls check 设备名` 校验。
 不使用函数时，首次初始化也可直接执行下面的等价命令，与上面的快捷函数初始化命令二选一：
 

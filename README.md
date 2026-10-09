@@ -128,6 +128,46 @@ mtls paths
 
 函数仅对当前终端有效；新终端需重新定义，或把函数保存到当前用户的 `~/.bashrc` 后重新加载。
 
+### Tab 补全
+
+在 Bash 4+ 中定义上述 `mtls` 函数后，加载补全：
+
+```bash
+source <(mtls completion bash)
+```
+
+输入命令时按 Tab，可补全子命令、当前子命令的参数、密钥算法、吊销原因、已有设备名，以及文件或目录路径。
+例如输入 `mtls rev` 后按 Tab 补全为 `mtls revoke`；输入 `mtls issue --key-algorithm p` 后按 Tab 查看匹配算法。
+设备名从当前数据目录的 CA 索引读取，沿用已保存的默认目录，也支持命令行中的 `--data-dir`。
+补全过程只读，不调用 OpenSSL、不询问密码；目录未初始化或配置损坏时不提供设备名候选。
+补全仅注册给 `mtls` 快捷函数，无需安装第三方依赖；直接执行 `python3 mtls.py` 时不启用此补全。
+更新脚本后重新加载补全，或按下面的方式重新加载 `~/.bashrc`。
+
+### bashrc 配置
+
+如需每次打开 Bash 终端都能使用快捷命令和 Tab 补全，编辑当前用户的 `~/.bashrc`，在文件末尾加入以下完整配置。
+如果已配置 `mtls` 函数，替换原来的定义和补全加载行，避免重复添加。服务器使用 root 操作时，配置文件为 `/root/.bashrc`。
+以下配置适用于 Bash 4+，脚本需已安装到 `/data/mtls-kit/mtls.py`：
+
+```bash
+# mtls-kit 快捷命令：使用当前用户保存的数据目录。
+mtls() {
+  python3 /data/mtls-kit/mtls.py "$@"
+}
+
+# 先定义函数，再加载 Tab 补全。
+source <(mtls completion bash)
+```
+
+保存后，在当前 Bash 终端执行，使配置立即生效：
+
+```bash
+source ~/.bashrc
+mtls status
+```
+
+之后可在任意工作目录使用 `mtls`，输入子命令或参数时按 Tab 补全。
+
 ## 快速开始
 
 以下是本机首次使用的完整流程，与上面的服务器初始化示例二选一。已有 CA 时跳过 `init`。
