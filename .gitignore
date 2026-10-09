@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 证书材料和私钥不提交到 Git。
+# 本地沿用部署布局时，签发数据库与公开副本也不提交。
+/data/
+/public/
+*.key
+*.p12
+*.pfx
+*.pem
+*.csr
+*.crt
+*.crl
