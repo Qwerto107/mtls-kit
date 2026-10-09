@@ -18,7 +18,7 @@ from pathlib import Path
 
 UTC = dt.timezone.utc
 # 工具版本独立于 Python 和 OpenSSL 的运行环境版本。
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 # 尚未保存默认目录时使用本机路径；配置与证书数据分开存放。
 DEFAULT_DATA = Path.home() / '.local' / 'share' / 'mtls-kit'
 CONFIG_FILE = Path.home() / '.config' / 'mtls-kit' / 'config.json'
@@ -485,9 +485,17 @@ authorityKeyIdentifier = keyid:always
         entry = self.select(self.args.name, self.args.serial)
         if entry['status'] == 'R' or entry['expires'] <= dt.datetime.now(UTC):
             raise ToolError('不能导出已吊销或已过期的证书，请先签发有效证书')
+        directory = self.client_dir(entry)
         key_secret = password('客户端私钥密码', self.args.client_password_file)
+        # 先确认私钥可以解密，再询问新 P12 密码；校验不输出私钥或创建文件。
+        result = self.openssl_run([
+            'pkey', '-in', directory / 'client.key',
+            '-passin', 'env:MTLS_KIT_CLIENT_PASSWORD', '-noout',
+        ], {'MTLS_KIT_CLIENT_PASSWORD': key_secret}, check=False)
+        if result.returncode:
+            raise ToolError('无法读取或解密客户端私钥，请检查私钥密码及文件是否完整、可读')
         p12_secret = password('新的 P12 导入密码', self.args.p12_password_file, confirm=True)
-        self.pack(self.client_dir(entry), self.args.output, key_secret, p12_secret)
+        self.pack(directory, self.args.output, key_secret, p12_secret)
 
     def revoke(self):
         self.require_ca()

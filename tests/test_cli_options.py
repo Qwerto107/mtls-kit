@@ -44,7 +44,7 @@ class CliOptionTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as result:
                     mtls.main()
                 self.assertEqual(result.exception.code, 0)
-                self.assertEqual(output.getvalue().strip(), 'mtls-kit 1.0.0')
+                self.assertEqual(output.getvalue().strip(), 'mtls-kit 1.0.1')
 
     def test_status_includes_tool_and_runtime_versions(self):
         # 仅替换外部环境检查，确认 status 保留原字段并新增工具版本。
@@ -53,7 +53,7 @@ class CliOptionTests(unittest.TestCase):
              patch.object(mtls.Authority, 'require_openssl', return_value='OpenSSL 3.0.0'), \
              contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(mtls.main(), 0)
-        for label in ('mtls-kit：1.0.0', 'Python：', 'OpenSSL：OpenSSL 3.0.0', 'CA 数据目录：', 'CA 已初始化：'):
+        for label in ('mtls-kit：1.0.1', 'Python：', 'OpenSSL：OpenSSL 3.0.0', 'CA 数据目录：', 'CA 已初始化：'):
             self.assertIn(label, output.getvalue())
 
 

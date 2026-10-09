@@ -2,7 +2,7 @@
 
 mtls-kit 是一个轻量级的 mTLS 客户端证书管理工具，用于为每台设备签发独立证书，并管理证书的续签、导出和吊销。
 它将常用的 OpenSSL 操作整理为一个 Python 命令行脚本，支持交互输入和参数调用，方便在管理员电脑或服务器上管理证书材料。
-当前工具版本为 `1.0.0`，可通过 `mtls -V` 或 `python3 mtls.py --version` 查看。
+当前工具版本为 `1.0.1`，可通过 `mtls -V` 或 `python3 mtls.py --version` 查看。
 
 ## 适用场景
 
@@ -296,6 +296,7 @@ python3 mtls.py revoke admin-laptop --serial 旧序列号 --reason superseded
 
 每次签发保存在 `clients/设备名/序列号/`，不会覆盖旧证书或私钥。
 已有客户端证书保持原状态，仍可检查、重新导出和吊销；执行 `renew` 默认生成 ECDSA P-256 新版本。
+`export` 输入客户端私钥密码后立即验证能否解密私钥，通过后才询问新的 P12 导入密码；验证失败立即报错，不生成输出文件。密码文件调用也遵循此顺序。
 `renew` 仍须在命令行指定设备名，默认有效期 1095 天；可用 `--key-algorithm` 和 `--days` 指定新版本的算法和有效期。
 安装并验证新 P12 后再吊销旧版本。现有 RSA CA 可继续使用，无需重新执行 `init` 或替换 Nginx 的 CA 证书。
 `show`、`check`、`export`、`paths`、`revoke` 支持 `--serial 十六进制序列号`。
