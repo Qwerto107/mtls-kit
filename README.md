@@ -2,6 +2,7 @@
 
 mtls-kit 是一个轻量级的 mTLS 客户端证书管理工具，用于为每台设备签发独立证书，并管理证书的续签、导出和吊销。
 它将常用的 OpenSSL 操作整理为一个 Python 命令行脚本，支持交互输入和参数调用，方便在管理员电脑或服务器上管理证书材料。
+当前工具版本为 `1.0.0`，可通过 `mtls -V` 或 `python3 mtls.py --version` 查看。
 
 ## 适用场景
 
@@ -78,6 +79,8 @@ python3 /data/mtls-kit/mtls.py status
 ## 默认数据目录
 
 目录选择顺序为：命令行 `--data-dir` → 当前用户已保存的目录 → `~/.local/share/mtls-kit`。
+`init` 未指定 `--data-dir` 时，首先交互输入数据目录；回车使用已保存的目录，首次使用时默认为 `~/.local/share/mtls-kit`。
+支持相对路径和 `~/`，最终保存绝对路径；新 CA 只能使用不存在或为空的目录。
 成功初始化后，工具将绝对路径保存到 `~/.config/mtls-kit/config.json`，配置只包含路径：
 
 ```json
@@ -116,7 +119,7 @@ mtls() {
 ```
 
 函数不固定数据目录，自动使用当前用户已保存的目录；如需临时操作其他目录，可在子命令前提供 `--data-dir`。
-首次初始化到指定目录时使用 `mtls --data-dir /data/mtls-kit/data init`；已有 CA 跳过初始化，先确认默认目录配置。
+首次初始化可使用 `mtls init` 并交互输入 `/data/mtls-kit/data`，或使用 `mtls --data-dir /data/mtls-kit/data init` 跳过目录提示；已有 CA 跳过初始化，先确认默认目录配置。
 后续可在任意工作目录执行：
 
 ```bash
@@ -168,6 +171,31 @@ mtls status
 
 之后可在任意工作目录使用 `mtls`，输入子命令或参数时按 Tab 补全。
 
+## 常用短参数与版本
+
+长参数继续可用，以下短参数与对应长参数等价，Tab 补全也支持短参数：
+
+| 长参数 | 短参数 | 适用范围 |
+| --- | --- | --- |
+| `--output` | `-o` | `export` 的 P12 输出路径 |
+| `--data-dir` | `-d` | 全局数据目录，放在子命令之前 |
+| `--name` | `-n` | `list` 的设备过滤 |
+| `--serial` | `-s` | `show`、`check`、`export`、`revoke`、`paths` |
+| `--all` | `-a` | `revoke` 吊销设备全部版本 |
+| `--reason` | `-r` | `revoke` 的吊销原因 |
+| `--key-algorithm` | `-k` | `init`、`issue`、`renew` 的密钥算法 |
+| `--days` | `-t` | `init`、`issue`、`renew`、`crl` 的有效天数 |
+| `--version` | `-V` | 只显示工具版本，无需读取 CA 配置或调用 OpenSSL |
+
+```bash
+mtls -V
+mtls -d /data/mtls-kit/data status
+mtls list -n admin-laptop
+mtls export admin-laptop -o ./admin-laptop-new.p12
+```
+
+`-s` 与 `-a` 仍不能同时使用。`--crl-days` 和密码文件参数继续使用长参数。
+
 ## 快速开始
 
 以下是本机首次使用的完整流程，与上面的服务器初始化示例二选一。已有 CA 时跳过 `init`。
@@ -175,7 +203,7 @@ mtls status
 ```bash
 python3 mtls.py status
 
-# 初始化专用 CA，交互设置名称、密钥算法、有效期和 CA 密码
+# 初始化专用 CA，交互设置数据目录、名称、密钥算法、有效期和 CA 密码
 python3 mtls.py init
 
 # 每台设备使用独立名称，交互选择算法、有效期并输入密码
@@ -191,12 +219,14 @@ python3 mtls.py paths
 python3 mtls.py paths admin-laptop
 ```
 
-`status` 是只读环境检查：显示 Python、OpenSSL、实际数据目录，以及是否存在 `openssl.cnf`。
+`status` 是只读环境检查：显示 mtls-kit 工具版本、Python 和 OpenSSL 版本、实际数据目录，以及是否存在 `openssl.cnf`。
 “CA 已初始化”为真仅表示该配置文件存在，不代表 CA 材料完整、证书有效或线上验证正常；具体设备证书使用 `check 设备名` 校验。
 
-`init` 按顺序询问以下设置，前三项直接回车使用默认值：
+`init` 按顺序询问以下设置，数据目录、CA 名称、算法和有效期均可直接回车使用默认值。
+下面以首次使用的 root 用户为例，数据目录提示会显示当前用户的实际绝对路径；已有配置时显示已保存的目录：
 
 ```text
+CA 数据目录（默认 /root/.local/share/mtls-kit）：
 CA 名称（默认 MTLS Client CA）：
 CA 密钥算法：
   1. ECDSA P-256
@@ -211,9 +241,10 @@ CA 私钥密码：
 ```
 
 无效名称、选项或天数会提示重新输入。CA 名称支持中文，UTF-8 编码长度不超过 64 字节，不能包含控制字符或反斜杠。
+目录无效、路径为文件或目录非空时，也会提示重新输入，不覆盖已有数据。显式指定 `--data-dir` 时跳过目录提示，路径无效则直接报错。
 CA 有效期须为正整数，工具不设置最大天数，直接回车仍使用 3650 天。
 CA 密码仍须至少 8 个字符，不能为空；输入时不显示字符。CRL 初始有效期仍为 30 天。
-`init --cn`、`--key-algorithm`、`--days` 可以直接设置对应项，已提供的项不再询问。
+`--data-dir`、`init --cn`、`--key-algorithm`、`--days` 可以直接设置对应项，已提供的项不再询问；`--data-dir` 放在 `init` 之前。
 初始化时选择的算法仅用于 CA，客户端签发和续签仍默认 P-256。
 
 `issue` 支持省略设备名，此时先询问设备名，再依次选择算法、有效期和输入密码：

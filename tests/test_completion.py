@@ -119,9 +119,13 @@ class CompletionTests(unittest.TestCase):
         self.assertEqual(shell_candidates('mtls', '--data-dir', str(self.home / 'CA')), [str(self.data)])
         self.assertEqual(shell_candidates('mtls', '--data-dir', '~/CA'), [str(self.data)])
         self.assertEqual(shell_candidates('mtls', '--data-dir=' + str(self.home / 'CA')), ['--data-dir=' + str(self.data)])
+        self.assertEqual(shell_candidates('mtls', '-d=' + str(self.home / 'CA')), ['-d=' + str(self.data)])
+        self.assertEqual(shell_candidates('mtls', 'issue', '-k', 'p'), ['p256', 'p384', 'p521'])
+        self.assertEqual(shell_candidates('mtls', '-d', str(self.data), 'list', '-n', 'a'), ['admin-laptop'])
         secret_file = self.home / 'secret $(touch unexpected).txt'
         secret_file.touch()
         self.assertEqual(shell_candidates('mtls', 'export', 'phone', '--output', str(self.home / 'secret')), [str(secret_file)])
+        self.assertEqual(shell_candidates('mtls', 'export', 'phone', '-o', str(self.home / 'secret')), [str(secret_file)])
         self.assertFalse((Path.cwd() / 'unexpected').exists())
         self.config.write_text('{broken')
         self.assertEqual(shell_candidates('mtls', 'revoke', ''), [])

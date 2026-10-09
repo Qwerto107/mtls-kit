@@ -17,6 +17,8 @@ from pathlib import Path
 
 
 UTC = dt.timezone.utc
+# 工具版本独立于 Python 和 OpenSSL 的运行环境版本。
+VERSION = '1.0.0'
 # 尚未保存默认目录时使用本机路径；配置与证书数据分开存放。
 DEFAULT_DATA = Path.home() / '.local' / 'share' / 'mtls-kit'
 CONFIG_FILE = Path.home() / '.config' / 'mtls-kit' / 'config.json'
@@ -70,6 +72,19 @@ def save_data_directory(directory):
     os.chmod(CONFIG_FILE.parent, 0o700)
     content = json.dumps({'data_dir': str(directory)}, ensure_ascii=False, indent=2) + '\n'
     write_file(CONFIG_FILE, content)
+
+
+def initialization_directory(value):
+    # 先规范化并校验路径，交互重试期间不创建目录、不修改已有数据。
+    directory = data_directory(value)
+    if any(character in directory.as_posix() for character in '\n\r"$'):
+        raise ToolError('CA 目录不能包含换行、双引号或美元符号')
+    if directory.exists():
+        if not directory.is_dir():
+            raise ToolError(f'CA 数据路径必须是目录：{directory}')
+        if any(directory.iterdir()):
+            raise ToolError(f'初始化目录必须为空：{directory}')
+    return directory
 
 
 def prompt_value(label, default, validate):
@@ -287,11 +302,12 @@ class Authority:
         print(f'CRL 已更新，有效期 {days} 天：{self.root / "ca.crl"}')
 
     def init(self):
-        # 禁止重复初始化或覆盖已有数据；失败后的残留也交给管理员检查。
-        if self.root.exists() and any(self.root.iterdir()):
-            raise ToolError(f'初始化目录必须为空：{self.root}')
-        if any(character in self.root.as_posix() for character in '\n\r"$'):
-            raise ToolError('CA 目录不能包含换行、双引号或美元符号')
+        # 未指定路径时先交互选择，回车沿用当前默认目录；显式参数不再询问。
+        if self.args.data_dir is None:
+            self.root = prompt_value('CA 数据目录', str(self.root), initialization_directory)
+        else:
+            self.root = initialization_directory(str(self.root))
+        self.config = self.root / 'openssl.cnf'
         name = self.args.cn
         if name is None:
             name = prompt_value('CA 名称', DEFAULT_CA_NAME, ca_name)
@@ -565,14 +581,15 @@ def day_count(value):
 
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument('--data-dir', help='CA 数据目录；省略时使用已保存目录，无配置时使用 ~/.local/share/mtls-kit')
+    result.add_argument('-V', '--version', action='version', version=f'mtls-kit {VERSION}')
+    result.add_argument('-d', '--data-dir', help='CA 数据目录；init 省略时交互选择，其他命令使用已保存目录，无配置时使用 ~/.local/share/mtls-kit')
     result.add_argument('--openssl', default='openssl', help='OpenSSL 3.x 可执行文件')
     result.add_argument('--ca-password-file', help='CA 密码文件，用于自动化；Linux 权限必须为 600')
     commands = result.add_subparsers(dest='command', required=True)
     initialization = commands.add_parser('init', help='初始化加密 CA，并生成首份 CRL')
     initialization.add_argument('--cn', type=ca_name, help='CA 名称；省略时交互输入，回车使用 MTLS Client CA')
-    initialization.add_argument('--key-algorithm', choices=KEY_ALGORITHMS, help='CA 密钥算法；省略时用数字交互选择，回车使用 p256')
-    initialization.add_argument('--days', type=positive_days, help='CA 有效天数，须为正整数，无工具上限；省略时交互输入，回车使用 3650')
+    initialization.add_argument('-k', '--key-algorithm', choices=KEY_ALGORITHMS, help='CA 密钥算法；省略时用数字交互选择，回车使用 p256')
+    initialization.add_argument('-t', '--days', type=positive_days, help='CA 有效天数，须为正整数，无工具上限；省略时交互输入，回车使用 3650')
     for command in ('issue', 'renew'):
         issuance = commands.add_parser(command, help='签发设备证书；renew 保留旧证书供安装切换')
         issuance.add_argument(
@@ -580,38 +597,38 @@ def parser():
             help='设备名，例如 admin-laptop；issue 省略时交互输入',
         )
         issuance.add_argument(
-            '--key-algorithm', choices=KEY_ALGORITHMS,
+            '-k', '--key-algorithm', choices=KEY_ALGORITHMS,
             default=None if command == 'issue' else 'p256',
             help='客户端密钥算法；issue 省略时交互选择，默认 p256',
         )
         issuance.add_argument(
-            '--days', type=day_count,
+            '-t', '--days', type=day_count,
             default=None if command == 'issue' else DEFAULT_CLIENT_DAYS,
             help='客户端证书有效天数；issue 省略时交互输入，回车使用 1095 天（约 3 年）',
         )
         issuance.add_argument('--client-password-file', help='客户端私钥和 P12 的密码文件')
     listing = commands.add_parser('list', help='列出所有历史证书和 CRL 有效期')
-    listing.add_argument('--name', help='只显示指定设备')
+    listing.add_argument('-n', '--name', help='只显示指定设备')
     descriptions = {'export': '重新导出 P12', 'revoke': '吊销证书并更新 CRL', 'check': '本地检查证书和 CRL', 'show': '查看证书详情和路径'}
     for command in descriptions:
         operation = commands.add_parser(command, help=descriptions[command])
         operation.add_argument('name', help='设备名')
         selection = operation.add_mutually_exclusive_group()
-        selection.add_argument('--serial', help='指定历史证书；省略时使用最新序列号')
+        selection.add_argument('-s', '--serial', help='指定历史证书；省略时使用最新序列号')
         if command == 'revoke':
-            selection.add_argument('--all', action='store_true', help='吊销该设备全部版本的证书')
-            operation.add_argument('--reason', choices=['unspecified', 'keyCompromise', 'superseded', 'cessationOfOperation'], default='unspecified')
+            selection.add_argument('-a', '--all', action='store_true', help='吊销该设备全部版本的证书')
+            operation.add_argument('-r', '--reason', choices=['unspecified', 'keyCompromise', 'superseded', 'cessationOfOperation'], default='unspecified')
             operation.add_argument('--crl-days', type=day_count, default=30)
         if command == 'export':
             operation.add_argument('--client-password-file', help='已有客户端私钥的密码文件')
-            operation.add_argument('--output', required=True, help='新的 P12 输出路径，不覆盖已有文件')
+            operation.add_argument('-o', '--output', required=True, help='新的 P12 输出路径，不覆盖已有文件')
             operation.add_argument('--p12-password-file', help='新的 P12 导入密码文件')
     crl = commands.add_parser('crl', help='刷新 CRL，有效期内也需要定期执行')
-    crl.add_argument('--days', type=day_count, default=30, help='CRL 有效天数')
+    crl.add_argument('-t', '--days', type=day_count, default=30, help='CRL 有效天数')
     paths = commands.add_parser('paths', help='只输出 CA、CRL 或指定设备的证书路径')
     paths.add_argument('name', nargs='?', help='可选设备名')
-    paths.add_argument('--serial', help='指定设备的历史证书序列号')
-    commands.add_parser('status', help='查看 Python、OpenSSL、CA 数据位置和初始化状态')
+    paths.add_argument('-s', '--serial', help='指定设备的历史证书序列号')
+    commands.add_parser('status', help='查看工具、Python、OpenSSL 版本、CA 数据位置和初始化状态')
     completion = commands.add_parser('completion', help='输出只读的 Shell 补全脚本')
     completion.add_argument('shell', choices=['bash'], help='目前支持 Bash 4+，加载后补全 mtls 快捷函数')
     # 内部查询只返回候选，不执行原命令；隐藏参数避免干扰日常帮助。
@@ -703,7 +720,7 @@ _mtls_complete() {
     case "${matches[0]-}" in
         directory|file)
             # 保留未拆分的 --参数= 前缀；文件名作为数组元素保留空格。
-            if [[ "$cur" == --*=* ]]; then
+            if [[ "$cur" == -*=* ]]; then
                 option_prefix="${cur%%=*}="
                 cur="${cur#*=}"
             elif [[ "$cur" == =* ]]; then
@@ -759,6 +776,7 @@ def main():
             return 0
         authority = Authority(args)
         if args.command == 'status':
+            print(f'mtls-kit：{VERSION}')
             print(f'Python：{sys.version.split()[0]}\nOpenSSL：{authority.require_openssl()}')
             print(f'CA 数据目录：{authority.root}\nCA 已初始化：{authority.config.is_file()}')
         else:

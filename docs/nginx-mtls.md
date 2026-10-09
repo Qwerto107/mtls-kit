@@ -91,7 +91,7 @@ mtls paths admin-laptop
 ```
 
 `mtls` 是当前终端的 Bash 函数，新开终端需重新定义，或保存到当前用户的 `~/.bashrc` 后重新加载。
-快捷函数不固定数据目录，使用已保存的默认目录；首次初始化时显式指定 `/data/mtls-kit/data`，后续无需重复传入。
+快捷函数不固定数据目录，使用已保存的默认目录；首次初始化时可按示例显式指定 `/data/mtls-kit/data`，或执行 `mtls init` 并在目录提示中输入该路径，后续无需重复传入。
 需要 Tab 补全时，在 Bash 4+ 中定义函数后加载：
 
 ```bash
@@ -122,7 +122,8 @@ source ~/.bashrc
 mtls status
 ```
 
-`mtls status` 只检查环境和 `openssl.cnf` 是否存在，不证明 CA 材料完整；设备证书用 `mtls check 设备名` 校验。
+`mtls status` 显示 mtls-kit 工具版本、Python 和 OpenSSL 版本、实际数据目录及 `openssl.cnf` 是否存在，不证明 CA 材料完整；设备证书用 `mtls check 设备名` 校验。
+只查看工具版本可用 `mtls -V`，无需读取 CA 配置或调用 OpenSSL。常用参数支持短写，例如 `-d` 为 `--data-dir`、`-o` 为 `--output`；完整对应表见 [常用短参数与版本](../README.md#常用短参数与版本)。
 不使用函数时，首次初始化也可直接执行下面的等价命令，与上面的快捷函数初始化命令二选一：
 
 ```bash
@@ -140,7 +141,9 @@ python3 /data/mtls-kit/mtls.py issue
 显式 `--data-dir` 始终优先；普通用户与 root 各自使用自己的配置。只有成功初始化会保存目录，签发、查询等命令不会更改默认目录。
 已有 CA 不要重新执行 `init`：继续使用原路径参数，或将其绝对路径手动写入当前用户配置文件的 `data_dir`。
 
-`init` 只执行一次，重复初始化会被拒绝。初始化会依次询问 CA 名称、密钥算法和有效期，直接回车分别使用 `MTLS Client CA`、ECDSA P-256 和 3650 天（约 10 年），随后输入并确认 CA 私钥密码。
+每套 CA 只执行一次 `init`，已有数据不会被覆盖。未指定 `--data-dir` 时，初始化先询问 CA 数据目录：回车使用已保存的目录，首次使用 root 用户时默认为 `/root/.local/share/mtls-kit`；本文部署应输入 `/data/mtls-kit/data`。
+显式指定 `--data-dir /data/mtls-kit/data` 时跳过目录提示；目录必须不存在或为空，交互输入无效时会要求重新输入。
+随后依次询问 CA 名称、密钥算法和有效期，直接回车分别使用 `MTLS Client CA`、ECDSA P-256 和 3650 天（约 10 年），最后输入并确认 CA 私钥密码。
 密钥算法用数字选择：1 为 P-256、2 为 P-384、3 为 P-521、4 为 RSA 3072、5 为 RSA 4096；CA 有效期可输入任意正整数天数，工具不设置最大天数。
 CA 和客户端默认使用 ECDSA P-256（OpenSSL 曲线名 `prime256v1`），客户端证书默认有效期 1095 天（约 3 年）；初始化选择其他 CA 算法不会改变客户端默认值。
 升级脚本不会更换已有 CA；现有 RSA CA 可继续签发 P-256 客户端证书，无需重新初始化。
@@ -167,7 +170,7 @@ CA 和客户端默认使用 ECDSA P-256（OpenSSL 曲线名 `prime256v1`），�
 
 ```bash
 mtls export admin-laptop \
-  --output /data/mtls-kit/data/exports/admin-laptop.p12
+  -o /data/mtls-kit/data/exports/admin-laptop.p12
 ```
 
 已有文件不会被覆盖。初始化后保持数据路径稳定，因为 `openssl.cnf` 记录 CA 数据的绝对目录。
